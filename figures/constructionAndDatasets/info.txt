@@ -1,0 +1,3 @@
+# convert with image magic:
+convert ./figure_spnconstruction.png -transparent white -alpha remove -alpha off ./figure_spnconstruction.jpg
+convert ./figure_spnconstruction.jpg -border 20x20 ./figure_spnconstruction.jpg
