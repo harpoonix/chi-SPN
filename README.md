@@ -25,6 +25,6 @@ Decision Trees for all data set of Experiment 3 can be viewed in the following P
 
 ## GradCAM
 
-Additional GradCAM visualizations of CNN trained with MSE (left), ciSPN trained with NLL (middle) and CNN trained with ciSPN (right) on the Hidden Object data set. CiSPN and NN+causal loss utilize the provided intervention information and subsequently focus the causally correct objects.
-![Grad Cam Images](./figures/gradCAMAppendix/figure_appendix_gradCAMCausalImg.jpg "Grad CAM Images of models trained on the Hidden Object Dataset.")
+Additional GradCAM visualizations of CNN trained with MSE (left), ciSPN trained with NLL (middle) and CNN trained with ciSPN (right) on the Hidden Object data set. CiSPN and NN+causal loss utilize the provided intervention information and subsequently focus the causally correct objects:
+[GradCAM Images](./figures/gradCAMAppendix/figure_appendix_gradCAMCausalImg.pdf)
 
