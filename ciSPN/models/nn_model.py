@@ -39,6 +39,10 @@ class MLPModel(torch.nn.Module):
 class MLPModelNN(torch.nn.Module):
 
     def __init__(self, num_inputs, num_leaf_weights):
+        """`num_inputs` is `num_condition_vars`
+        
+        `num_leaf_weights` is `num_target_vars`
+        """
         super().__init__()
 
         num_interm_features = 75 #XXX

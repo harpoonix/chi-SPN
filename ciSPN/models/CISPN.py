@@ -1,6 +1,7 @@
 import torch
 import math
 from .RegionGraph import RegionGraph
+from .dist import AlphaStable
 
 NINF = -float('inf')
 
@@ -100,6 +101,8 @@ class SPNFlatParamProvider:
         self.nn = nn
 
     def estimate_parameters(self, x):
+        # I think these parameters are estimated from the neural network that learns these weights
+        # weights for both gating nodes and distributions at the leaf
         sum_weights, leaf_weights = self.nn.forward(x)
         self.set_params(sum_weights, leaf_weights)
 
@@ -377,6 +380,137 @@ class CiSPNGaussNode(CiSPNNode):
         # it explicitly in the product node)
         recons[case_num, self.region] += my_sample
 
+class CiSPNLeafNode(CiSPNNode):
+    def __init__(self, region, node_parameterization: NodeParameterization, dist: torch.distributions.Distribution):
+        super().__init__(region, is_leaf=True, childs=None)
+
+        self.node_parameterization = node_parameterization
+        self.process_config = node_parameterization.process_config
+        self.dist = dist
+        self.means_idx = self.node_parameterization.param_provider.generate_leaf_index(self.region, self.node_parameterization.num_gauss)
+
+        self.num_outputs = node_parameterization.num_gauss
+
+    def forward(self, x):
+        self.means = self.node_parameterization.param_provider.access_leaf_parameters(self.means_idx)
+
+        if self.gauss_min_var < self.gauss_max_var:
+            sigma_params = self.node_parameterization.param_provider.access_leaf_parameters(self.sigma_params_idx)
+            sigma = self.gauss_min_var + torch.sigmoid(sigma_params) * (self.gauss_max_var - self.gauss_min_var)
+        else:
+            sigma = 1.0
+
+        self.dist.loc = self.means
+        self.dist.scale = torch.sqrt(sigma)
+
+        local_inputs = x[:, self.region]  # select scope from data
+        local_inputs = torch.unsqueeze(local_inputs, -1)
+        gauss_log_pdf_single = self.dist.log_prob(local_inputs)
+
+        # marginalized[v] = 0 -> variable v weights are kept in the forward pass
+        # marginalized[v] = 1 -> variable v weights are zeroed out in the forward pass
+        if self.process_config.marginalized is not None:
+            #marginalized = torch.clip(marginalized, 0.0, 1.0)
+            local_marginalized = torch.unsqueeze(self.process_config.marginalized[:, self.region], -1)
+
+            # setting a value zero in log space = multiplying by one = marginalizing it out
+            gauss_log_pdf_single = gauss_log_pdf_single * (1 - local_marginalized)
+
+        gauss_log_pdf = torch.sum(gauss_log_pdf_single, dim=1)
+        #print("gauss", gauss_log_pdf.shape)
+        return gauss_log_pdf
+
+    def num_params(self):
+        sum = self.node_parameterization.param_provider.num_params_from_leaf_index(self.means_idx)
+        if self.sigma_params_idx is not None:
+            sum += self.node_parameterization.param_provider.num_params_from_leaf_index(self.sigma_params_idx)
+        return sum
+
+
+    def reconstruct(self, node_num, case_num, recons):
+        my_sample = self.means[case_num, ...] #means.shape = [1000, 1, 4]
+        my_sample = my_sample[:, node_num]
+        #full_sample = torch.zeros((self.node_parameterization.num_total_variables,), device=my_sample.device)
+        #full_sample[self.region] = my_sample
+        #return full_sample
+
+        # we add our value since, there might be already another value (= doing 'inplace summation' instead of doing
+        # it explicitly in the product node)
+        recons[case_num, self.region] += my_sample
+
+
+class CiSPNECFLeafNode(CiSPNNode):
+    def __init__(self, region, node_parameterization: NodeParameterization):
+        super().__init__(region, is_leaf=True, childs=None)
+
+        self.node_parameterization = node_parameterization
+        self.process_config = node_parameterization.process_config
+        # self.num_gaussians = node_parameterization.num_gauss
+
+        # self.gauss_min_var = node_parameterization.gauss_min_var
+        # self.gauss_max_var = node_parameterization.gauss_max_var
+
+        # self.means_idx = self.node_parameterization.param_provider.generate_leaf_index(self.region, self.node_parameterization.num_gauss)
+        self.means_idx = self.node_parameterization.param_provider.generate_leaf_index(self.region, 1)
+
+        # if self.gauss_min_var < self.gauss_max_var:
+        #     self.sigma_params_idx = self.node_parameterization.param_provider.generate_leaf_index(self.region, self.node_parameterization.num_gauss)
+        # else:
+        #     self.sigma_params_idx = None
+
+        # parameters are set during forward pass
+        # self.dist = torch.distributions.Normal(0.0, 1.0)
+
+        # self.num_outputs = node_parameterization.num_gauss
+        self.num_outputs = 1
+
+    def forward(self, x):
+        # don't need params for ECF
+        # self.means = self.node_parameterization.param_provider.access_leaf_parameters(self.means_idx)
+
+        # if self.gauss_min_var < self.gauss_max_var:
+        #     sigma_params = self.node_parameterization.param_provider.access_leaf_parameters(self.sigma_params_idx)
+        #     sigma = self.gauss_min_var + torch.sigmoid(sigma_params) * (self.gauss_max_var - self.gauss_min_var)
+        # else:
+        #     sigma = 1.0
+
+        # self.dist.loc = self.means
+        # self.dist.scale = torch.sqrt(sigma)
+
+        local_inputs = x[:, self.region]  # select scope from data
+        local_inputs = torch.unsqueeze(local_inputs, -1)
+        gauss_log_pdf_single = self.dist.log_prob(local_inputs)
+
+        # marginalized[v] = 0 -> variable v weights are kept in the forward pass
+        # marginalized[v] = 1 -> variable v weights are zeroed out in the forward pass
+        if self.process_config.marginalized is not None:
+            #marginalized = torch.clip(marginalized, 0.0, 1.0)
+            local_marginalized = torch.unsqueeze(self.process_config.marginalized[:, self.region], -1)
+
+            # setting a value zero in log space = multiplying by one = marginalizing it out
+            gauss_log_pdf_single = gauss_log_pdf_single * (1 - local_marginalized)
+
+        gauss_log_pdf = torch.sum(gauss_log_pdf_single, dim=1)
+        #print("gauss", gauss_log_pdf.shape)
+        return gauss_log_pdf
+
+    def num_params(self):
+        sum = self.node_parameterization.param_provider.num_params_from_leaf_index(self.means_idx)
+        if self.sigma_params_idx is not None:
+            sum += self.node_parameterization.param_provider.num_params_from_leaf_index(self.sigma_params_idx)
+        return sum
+
+
+    def reconstruct(self, node_num, case_num, recons):
+        my_sample = self.means[case_num, ...] #means.shape = [1000, 1, 4]
+        my_sample = my_sample[:, node_num]
+        #full_sample = torch.zeros((self.node_parameterization.num_total_variables,), device=my_sample.device)
+        #full_sample[self.region] = my_sample
+        #return full_sample
+
+        # we add our value since, there might be already another value (= doing 'inplace summation' instead of doing
+        # it explicitly in the product node)
+        recons[case_num, self.region] += my_sample
 
 class CiSPNProcessConfig:
 
