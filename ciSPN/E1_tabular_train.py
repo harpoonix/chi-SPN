@@ -22,7 +22,7 @@ from libs.pawork.log_redirect import PrintLogger
 print("start")
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--seed", type=int, default=606) # 606, 1011, 3004, 5555, 12096
+parser.add_argument("--seed", type=int, default=999) # 606, 1011, 3004, 5555, 12096
 parser.add_argument("--model", choices=["mlp", "ciSPN"], default='mlp')
 parser.add_argument("--loss", choices=["MSELoss", "NLLLoss", "causalLoss"], default='MSELoss')
 parser.add_argument("--lr", type=float, default=1e-3) # default is 1e-3
@@ -30,8 +30,10 @@ parser.add_argument("--loss2", choices=["causalLoss"], default=None)
 parser.add_argument("--loss2_factor", default="1.0")  # factor by which loss2 is added to the loss term
 parser.add_argument("--epochs", type=int, default=50) # or 50
 parser.add_argument("--loss_load_seed", type=int, default=None) # is set to seed if none
-parser.add_argument("--dataset", choices=["CHC", "ASIA", "CANCER", "EARTHQUAKE", "CHAIN"], default="CHC") # CausalHealthClassification
+parser.add_argument("--dataset", choices=["CHC", "ASIA", "CANCER", "EARTHQUAKE", "CHAIN", "JOB", "STUDENT"], default="CHC") # CausalHealthClassification
 parser.add_argument("--provide_interventions", choices=["true", "false"], default="true")  # provide intervention vector during training and use inintervened data
+parser.add_argument("--normalise-max", type = bool, default= False)
+parser.add_argument("--name", type = str, default= None)
 cli_args = parser.parse_args()
 
 conf = Config()
@@ -42,14 +44,15 @@ conf.num_epochs_load = conf.num_epochs # set to 80 when e.g. using a causal loss
 conf.loss_load_seed = cli_args.seed if cli_args.loss_load_seed is None else cli_args.loss_load_seed
 conf.optimizer_name = "adam"
 conf.lr = float(cli_args.lr)
-conf.batch_size = 1000
+conf.batch_size = 8000
 conf.loss_name = cli_args.loss
 conf.loss2_name = cli_args.loss2
 conf.loss2_factor = cli_args.loss2_factor
 conf.dataset = cli_args.dataset
 conf.seed = cli_args.seed
 conf.provide_interventions = (cli_args.provide_interventions.lower() == "true")
-
+conf.normalise_max = cli_args.normalise_max
+conf.name = cli_args.name
 
 make_deterministic(conf.seed)
 
@@ -58,7 +61,7 @@ runtime_base_dir = environment["experiments"]["base"] / "E1" / "runtimes"
 log_base_dir = environment["experiments"]["base"] / "E1" / "logs"
 
 experiment_name = get_experiment_name(conf.dataset, conf.model_name, conf.seed, conf.loss_name, conf.loss2_name,
-                                      conf.loss2_factor, provide_interventions=conf.provide_interventions)
+                                      conf.loss2_factor, provide_interventions=conf.provide_interventions, name=conf.name)
 save_dir = runtime_base_dir / experiment_name
 save_dir.mkdir(exist_ok=True, parents=True)
 
@@ -74,15 +77,19 @@ print("Arguments:", cli_args)
 # setup dataset
 X_vars, Y_vars, interventionProvider = get_data_description(conf.dataset, no_interventions=not conf.provide_interventions)
 dataset_paths = get_dataset_paths(conf.dataset, "train", no_interventions=not conf.provide_interventions)
-dataset = TabularDataset(dataset_paths, X_vars, Y_vars, conf.seed, part_transformer=interventionProvider)
-provider = BatchProvider(dataset, conf.batch_size)
+print(f'X_vars: {X_vars}, Y_vars: {Y_vars}')
+dataset = TabularDataset(dataset_paths, X_vars, Y_vars, seed = conf.seed, part_transformers=interventionProvider, normalise_max=conf.normalise_max, dataset_name=conf.dataset)
+provider = BatchProvider(dataset, conf.batch_size, dataset.rng)
 
 num_condition_vars = dataset.X.shape[1]
 num_target_vars = dataset.Y.shape[1]
 
+print(f'shape of X: {dataset.X.shape}, shape of Y: {dataset.Y.shape}')
+print(f'num_condition_vars: {num_condition_vars}, num_target_vars: {num_target_vars}')
+
 if conf.model_name == "ciSPN":
     # build spn graph
-    rg, params, spn = create_spn_model(num_target_vars, num_condition_vars, conf.seed)
+    rg, params, spn = create_spn_model(num_target_vars, num_condition_vars, conf.seed, discrete_ids= dataset.discrete_ids)
     model = spn
 elif conf.model_name == "mlp":
     nn = create_nn_model(num_condition_vars, num_target_vars)
@@ -92,7 +99,7 @@ model.print_structure_info()
 
 
 loss, loss_ispn = create_loss(conf.loss_name, conf, num_condition_vars,
-                              load_dir=runtime_base_dir / get_loss_path(conf.dataset, conf.loss_load_seed, provide_interventions=conf.provide_interventions))
+                              load_dir=runtime_base_dir / get_loss_path(conf.dataset, conf.loss_load_seed, provide_interventions=conf.provide_interventions, name= conf.name))
 
 if conf.loss2_name is not None:
     loss2, loss2_ispn, = create_loss(

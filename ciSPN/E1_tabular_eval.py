@@ -32,7 +32,7 @@ cli_args = parser.parse_args()
 conf = Config()
 conf.dataset = cli_args.dataset
 conf.model_name = cli_args.model
-conf.batch_size = 1000
+conf.batch_size = 8000
 conf.loss_name = cli_args.loss
 conf.loss2_name = cli_args.loss2
 conf.loss2_factor = cli_args.loss2_factor
@@ -90,6 +90,7 @@ with torch.no_grad():
 
     # zero out target vars, to avoid evaluation errors, if marginalization is not working
     demo_target_batch, demo_condition_batch = provider.get_sample_batch()
+    # demo target batch shape: torch.Size([1000, 3])
     placeholder_target_batch = torch.zeros_like(demo_target_batch).cuda()
     marginalized = torch.ones_like(demo_target_batch).cuda()
 

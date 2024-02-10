@@ -1,2 +1,0 @@
-# convert with image magic:
-convert ./figure_corrInterPred.png -transparent white -alpha remove -alpha off ./figure_corrInterPred.jpg

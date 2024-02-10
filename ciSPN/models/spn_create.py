@@ -30,7 +30,7 @@ def save_spn(save_dir, spn, args, rg, file_name="spn.model"):
     save_model_params(save_dir, spn, file_name=file_name)
 
 
-def load_spn(num_condition_vars, load_dir, file_name="spn.model", print_spn_info=True,
+def load_spn(num_condition_vars, load_dir, discrete_ids, file_name="spn.model", print_spn_info=True,
               nn_provider=None, nn_provider_args=None):
     # load_dir = conf.load_dir
 
@@ -41,7 +41,7 @@ def load_spn(num_condition_vars, load_dir, file_name="spn.model", print_spn_info
     with open(load_dir / "regionGraph.pkl", "rb") as f:
         rg = pickle.load(f)
 
-    spn = CiSPN(rg, args).cuda()
+    spn = CiSPN(rg, args, discrete_ids=discrete_ids).cuda()
     num_leaf_params, num_sum_params = spn.num_parameters()
 
     if nn_provider is not None:

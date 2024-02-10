@@ -2,8 +2,8 @@ from ciSPN.datasets.interventionHelpers import InterventionProvider
 
 var_sets = {
     "CHC": {
-        "X": ["A", "F", "H", "M", "intervention"],
-        "Y": ["D1", "D2", "D3"]
+        "X": ["intervention"],
+        "Y": [ "A", "F", "H", "M", "D1", "D2", "D3"]
     },
     "ASIA": {
         "X": ["A", "T", "B", "L", "E", "intervention"],
@@ -20,7 +20,15 @@ var_sets = {
     "CHAIN": {
         "X": ["A", "C", "intervention"],
         "Y": ["B"]
-    }
+    },
+    "JOB" : {
+        "X": ["intervention"],
+        "Y": ['W', 'Sk', 'B', 'I', 'E', 'Sc', 'D']
+    },
+    "STUDENT" : {
+        "X": ["intervention"],
+        "Y": ["Sc", "Q", "M", "C", "T", "S"]
+    },
 }
 
 def get_data_description(dataset_abrv, no_interventions=False):
@@ -33,6 +41,6 @@ def get_data_description(dataset_abrv, no_interventions=False):
         assert X[-1] == "intervention"
         X = X[:-1] # remove intervention entry
     else:
-        intervention_provider = InterventionProvider(dataset_abrv, no_interventions=no_interventions)
+        intervention_provider = InterventionProvider(dataset_abrv)
 
-    return X, Y, intervention_provider
+    return X, Y, [intervention_provider]

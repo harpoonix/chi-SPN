@@ -3,7 +3,7 @@ import numpy as np
 
 class RegionGraph:
 
-    def __init__(self, region, num_permutations=1, num_splits=2, max_depth=2, rng_seed=12345, verbose=True):
+    def __init__(self, region, num_permutations=1, num_splits=2, max_depth=4, rng_seed=12345, verbose=True):
         assert num_splits == 2, "Hardcoded. Assumed for several functions ..."
 
         self.verbose = verbose
@@ -59,7 +59,7 @@ class RegionGraphNode:
             else:
                 # assumes num_splits == 2
                 split = len(region) // 2
-                #print(region, "->", region[:split], region[split:])
+                # print(region, "->", region[:split], region[split:])
                 self.childs.append(RegionGraphNode(region[:split], num_splits=num_splits, max_depth=max_depth-1))
                 self.childs.append(RegionGraphNode(region[split:], num_splits=num_splits, max_depth=max_depth-1))
 

@@ -1,7 +1,9 @@
 import torch
 import math
-from .RegionGraph import RegionGraph
+from torch.distributions import Distribution, Categorical, Normal
+from .RegionGraph import RegionGraph, RegionGraphNode
 from .dist import AlphaStable
+from .characteristic import ECF
 
 NINF = -float('inf')
 
@@ -101,9 +103,18 @@ class SPNFlatParamProvider:
         self.nn = nn
 
     def estimate_parameters(self, x):
+        
         # I think these parameters are estimated from the neural network that learns these weights
         # weights for both gating nodes and distributions at the leaf
         sum_weights, leaf_weights = self.nn.forward(x)
+        assert(torch.isnan(x).any() == False)
+        # print(f'leaf_weights is {leaf_weights}')
+        # print(f'sum_weights is {sum_weights}')
+        try:
+            assert(torch.isnan(leaf_weights).any() == False and torch.isnan(sum_weights).any() == False)
+        except AssertionError as e:
+            print(e)
+            exit(0);
         self.set_params(sum_weights, leaf_weights)
 
     def reset(self):
@@ -123,10 +134,10 @@ class SPNFlatParamProvider:
 
         return idx_range_tuple
 
-    def generate_leaf_index(self, scope, num_parameters):
+    def generate_leaf_index(self, scope, param_size, num_parameters):
         assert(len(scope) == 1) # we need to do some reshaping in the access function otherwise
-        num_vars = len(scope) * num_parameters
-        idx_range_tuple = (self.leaf_params_used, self.leaf_params_used + num_vars, len(scope), num_parameters)
+        num_vars = param_size * num_parameters
+        idx_range_tuple = (self.leaf_params_used, self.leaf_params_used + num_vars, len(scope), num_parameters, param_size)
         self.leaf_params_used += num_vars
 
         return idx_range_tuple
@@ -142,10 +153,10 @@ class SPNFlatParamProvider:
         return torch.reshape(params, [-1, num_inputs, num_sums])
 
     def access_leaf_parameters(self, index):
-        idx_low, idx_high, num_inputs, num_params = index
+        idx_low, idx_high, num_inputs, num_params, param_size = index
 
         params = self.leaf_params[:, idx_low:idx_high]
-        return torch.reshape(params, [-1, num_inputs, num_params])
+        return torch.reshape(params, [-1, num_params, param_size])
 
     def num_params(self):
         return self.leaf_params_used, self.sum_params_used
@@ -157,22 +168,33 @@ class SPNFlatParamProvider:
         return idx[1] - idx[0]
 
 
-class NodeParameterization:
-
-    def __init__(self, param_provider: SPNFlatParamProvider, num_total_variables, num_gauss=4, num_sums=4):
+class Parameterization:
+    def __init__(self, param_provider: SPNFlatParamProvider, num_total_variables, num_sums, num_cat, num_alpha):
         self.param_provider = param_provider
 
         self.process_config = CiSPNProcessConfig()
 
         # used for sampling
         self.num_total_variables = num_total_variables
-
-        self.num_gauss = num_gauss
         self.num_sums = num_sums
+        self.num_cat = num_cat
+        self.num_alpha = num_alpha
+        
+
+class NodeParameterization(Parameterization):
+
+    def __init__(self, param_provider: SPNFlatParamProvider, num_total_variables, num_gauss=4, num_sums=4, num_cat = 4, num_alpha = 2):
+        super().__init__(param_provider, num_total_variables, num_sums, num_cat, num_alpha)
+        self.num_gauss = num_gauss
 
         self.gauss_min_var = 0.1
         self.gauss_max_var = 2
 
+class CategoricalParametrization(Parameterization):
+    
+    def __init__(self, param_provider: SPNFlatParamProvider, num_total_variables, categories, num_sums = 1):
+        super().__init__(param_provider, num_total_variables, num_sums)
+        self.categories = categories
 
 class CiSPNNode:
 
@@ -213,24 +235,28 @@ class CiSPNSumNode(CiSPNNode):
             self.node_child_offset.extend([offset] * child.num_outputs)
             offset += child.num_outputs
 
+        # self.node_child_map is [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+        # node child offset is [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16, 16]
         self.num_outputs = num_sums
 
-    def forward(self, x):
+    def logpdf(self, x):
         # sum nodes compute weighted sums out of all inputs
-        inputs = torch.cat([child.forward(x) for child in self.childs], dim=1)
+        inputs = torch.cat([child.logpdf(x) for child in self.childs], dim=1)
 
         params = self.param_provider.access_sum_parameters(self._param_idxs)
-
+        # shape of params is torch.Size([1000, 16, 4])
         # normalize weights
-        weights = torch.log_softmax(params, 1)
+        weights = torch.log_softmax(params, 1) # now the weights sum to 1
 
         # multiplication in log space is addition:
+        # print(f'shape of child.logpdf(x) is {[c.logpdf(x).shape for c in self.childs]}')
         child_values = torch.unsqueeze(inputs, -1) + weights
 
         if self.process_config.record_argmax:
             self._max_mask = torch.argmax(child_values, dim=1)
 
         if self.process_config.apply_mask:
+            print(f'apply mask is true')
             # apply point-wise mask
             log_zero = torch.ones_like(child_values) * NINF  # zero out parameters in log space
 
@@ -238,17 +264,36 @@ class CiSPNSumNode(CiSPNNode):
             oh_mask = torch.nn.functional.one_hot(self._max_mask, num_classes=child_values.shape[1]).transpose(1, 2)
 
             child_values = torch.where(oh_mask.bool(), child_values, log_zero)
-
         sums = torch.logsumexp(child_values, dim=1)
-        #print("sum", sums.shape)
+        # print("sum", sums.shape)
+        # exit(0);
         return sums
+    
+    def cf(self, x):
+        """log space"""
+        params = self.param_provider.access_sum_parameters(self._param_idxs)
+        # shape is batch_size, num_inputs, num_sums
+        weights = torch.log_softmax(params, dim = 1)
+        
+        child_cfs = torch.cat([child.cf(x) for child in self.childs], dim=1)
+        
+        """ if log now child_cfs and weights are both in log space, and of same shape"""
+        sum = torch.exp(weights + torch.unsqueeze(child_cfs, -1))
+        return torch.log(torch.sum(sum, dim=1) + 1e-8)
+        
+        return torch.sum(child_cfs * weights, dim=1, keepdim=True)
 
     def num_params(self):
         return self.param_provider.num_params_from_sum_index(self._param_idxs)
 
 
     def reconstruct(self, node_num, case_num, recons):
+        """case_num is the number of the sample in the batch
+        recons is the tensor of size (batch_size, num_variables) that contains the reconstructed values,
+        initialised to zero, and updated in this function"""
+        
         my_max_idx = self._max_mask[case_num, node_num]
+        """max_mask is argmax among child values, in dimension 1 (not across batch)"""
         # find the vector that output the max_idx
         #for inp_vector in self.inputs:
         #    if my_max_idx < inp_vector.size:
@@ -271,8 +316,8 @@ class CiSPNProductNode(CiSPNNode):
 
         self.num_outputs = math.prod([child.num_outputs for child in childs])
 
-    def forward(self, x):
-        inputs = [child.forward(x) for child in self.childs]
+    def logpdf(self, x):
+        inputs = [child.logpdf(x) for child in self.childs]
 
         #FIXME assumes 2 split of region. HARD CODED!
         dists1 = inputs[0]
@@ -284,13 +329,35 @@ class CiSPNProductNode(CiSPNNode):
         #  that is hardcoded and currently does not allow more than two splits ...)
         dists1_expand = torch.unsqueeze(dists1, 1)
         dists2_expand = torch.unsqueeze(dists2, 2)
+        # print(f'dists1_expand is {dists1_expand.shape}, dists2_expand is {dists2_expand.shape}')
 
         # product == sum in log-domain
         prods = dists1_expand + dists2_expand
         # flatten out the outer product
         prods = torch.reshape(prods, [dists1.shape[0], -1])
-        #print("prod", prods.shape)
+        # print("prod", prods.shape)
         return prods
+    
+    def cf(self, x):
+        """log space"""
+        child1 = self.childs[0].cf(x)
+        child2 = self.childs[1].cf(x)
+        
+        child1_expand = torch.unsqueeze(child1, 1)
+        child2_expand = torch.unsqueeze(child2, 2)
+        
+        """multiplication in log space is addition"""
+        prods = child1_expand + child2_expand
+        prods = torch.reshape(prods, [child1.shape[0], -1])
+        
+        return prods
+
+        child_cfs = torch.cat([child.cf(x) for child in self.childs], dim=1)
+        return torch.sum(child_cfs, dim=1, keepdim=True)
+        # bruh = torch.prod(child_cfs, dim=1, keepdim=True)+ 1e-8*(1 + 1j)
+        # print(bruh[0])
+        # return bruh
+        # return torch.prod(child_cfs, dim=1, keepdim=True) + 1e-8*(1 + 1j)
 
     def num_params(self):
         return 0
@@ -327,9 +394,11 @@ class CiSPNGaussNode(CiSPNNode):
             self.sigma_params_idx = self.node_parameterization.param_provider.generate_leaf_index(self.region, self.node_parameterization.num_gauss)
         else:
             self.sigma_params_idx = None
+        
+        # the gaussian has 4 dimensions, and mean and variance for each of those 4 dimensions is stored
 
         # parameters are set during forward pass
-        self.dist = torch.distributions.Normal(0.0, 1.0)
+        self.dist = Normal(0.0, 1.0)
 
         self.num_outputs = node_parameterization.num_gauss
 
@@ -344,10 +413,20 @@ class CiSPNGaussNode(CiSPNNode):
 
         self.dist.loc = self.means
         self.dist.scale = torch.sqrt(sigma)
+        # print(f'shape of self.means is {self.means.shape}')
+        # print(f'means is {self.means}')
+        # print(f'shape of self.dist.loc is {self.dist.scale.shape}')
+        # shape of self.means is torch.Size([1000, 1, 4])
+        # shape of self.dist.loc is torch.Size([1000, 1, 4])
 
+        # print(f'shape of x is {x.shape}')
+        # print(f'region is {self.region}')
         local_inputs = x[:, self.region]  # select scope from data
         local_inputs = torch.unsqueeze(local_inputs, -1)
+        # print(f'shape of local_inputs is {local_inputs.shape}')
         gauss_log_pdf_single = self.dist.log_prob(local_inputs)
+        # print(f'shape of gauss_log_pdf_single is {gauss_log_pdf_single.shape}, actual value is {gauss_log_pdf_single}')
+        # exit(0);
 
         # marginalized[v] = 0 -> variable v weights are kept in the forward pass
         # marginalized[v] = 1 -> variable v weights are zeroed out in the forward pass
@@ -359,8 +438,15 @@ class CiSPNGaussNode(CiSPNNode):
             gauss_log_pdf_single = gauss_log_pdf_single * (1 - local_marginalized)
 
         gauss_log_pdf = torch.sum(gauss_log_pdf_single, dim=1)
-        #print("gauss", gauss_log_pdf.shape)
+        # print("gauss", gauss_log_pdf.shape)
         return gauss_log_pdf
+    
+        """shape of self.means is torch.Size([1000, 1, 4])
+        shape of self.dist.loc is torch.Size([1000, 1, 4])
+        shape of x is torch.Size([1000, 3])
+        region is [0]
+        shape of local_inputs is torch.Size([1000, 1, 1])
+        shape of gauss_log_pdf_single is torch.Size([1000, 1, 4])"""
 
     def num_params(self):
         sum = self.node_parameterization.param_provider.num_params_from_leaf_index(self.means_idx)
@@ -379,125 +465,110 @@ class CiSPNGaussNode(CiSPNNode):
         # we add our value since, there might be already another value (= doing 'inplace summation' instead of doing
         # it explicitly in the product node)
         recons[case_num, self.region] += my_sample
+        print(f'added {my_sample} to {case_num, self.region}')
 
 class CiSPNLeafNode(CiSPNNode):
-    def __init__(self, region, node_parameterization: NodeParameterization, dist: torch.distributions.Distribution):
+    def __init__(self, region, node_parameterization: Parameterization, disttype: str = 'Categorical' or 'AlphaStable', num_categories = None):
         super().__init__(region, is_leaf=True, childs=None)
 
         self.node_parameterization = node_parameterization
         self.process_config = node_parameterization.process_config
-        self.dist = dist
-        self.means_idx = self.node_parameterization.param_provider.generate_leaf_index(self.region, self.node_parameterization.num_gauss)
+        self.disttype = disttype
+        if disttype == 'Categorical' :
+            self.categories = num_categories
+            self.category_weights_idx = self.node_parameterization.param_provider.generate_leaf_index(self.region, num_categories, node_parameterization.num_cat)
+            self.num_outputs = node_parameterization.num_cat
+        
+        if disttype == 'AlphaStable':
+            self.stable_weights_idx = self.node_parameterization.param_provider.generate_leaf_index(self.region, 4, node_parameterization.num_alpha)
+            self.num_outputs = node_parameterization.num_alpha
 
-        self.num_outputs = node_parameterization.num_gauss
+    def cf(self, x):
+        if self.disttype == 'Categorical':
+            # shape is batch_size, num_dists, num_categories
+            self.category_weights = self.node_parameterization.param_provider.access_leaf_parameters(self.category_weights_idx)
+            assert(torch.isnan(self.category_weights).any() == False)
+            max_value, _ = torch.max(self.category_weights, dim=2, keepdim=True)
+            self.category_weights = self.category_weights - max_value
+            self.category_weights = torch.softmax(self.category_weights, dim = 2)
+            try:
+                self.dist = Categorical(self.category_weights)
+            except RuntimeError as e:
+                print(f'example of category_weights is {self.category_weights[0]}')
+                print(e)
+                exit(0);
+            local_inputs = x[:, self.region].reshape(1,-1, 1) # shape is (1, batch_size)
+            x_supp = torch.arange(1, self.categories + 1).to(x.device).reshape(-1,1,1)
+            def cf_cat(t):
+                return torch.sum(self.category_weights.permute(2, 0, 1)*torch.exp(1j*t*x_supp), dim = 0)
+            logcf = torch.log(cf_cat(local_inputs).reshape(-1,self.node_parameterization.num_cat))
+            # print(f'categorical log cf shape is {logcf.shape}')
+            return logcf
 
-    def forward(self, x):
-        self.means = self.node_parameterization.param_provider.access_leaf_parameters(self.means_idx)
-
-        if self.gauss_min_var < self.gauss_max_var:
-            sigma_params = self.node_parameterization.param_provider.access_leaf_parameters(self.sigma_params_idx)
-            sigma = self.gauss_min_var + torch.sigmoid(sigma_params) * (self.gauss_max_var - self.gauss_min_var)
-        else:
-            sigma = 1.0
-
-        self.dist.loc = self.means
-        self.dist.scale = torch.sqrt(sigma)
-
-        local_inputs = x[:, self.region]  # select scope from data
-        local_inputs = torch.unsqueeze(local_inputs, -1)
-        gauss_log_pdf_single = self.dist.log_prob(local_inputs)
-
-        # marginalized[v] = 0 -> variable v weights are kept in the forward pass
-        # marginalized[v] = 1 -> variable v weights are zeroed out in the forward pass
-        if self.process_config.marginalized is not None:
-            #marginalized = torch.clip(marginalized, 0.0, 1.0)
-            local_marginalized = torch.unsqueeze(self.process_config.marginalized[:, self.region], -1)
-
-            # setting a value zero in log space = multiplying by one = marginalizing it out
-            gauss_log_pdf_single = gauss_log_pdf_single * (1 - local_marginalized)
-
-        gauss_log_pdf = torch.sum(gauss_log_pdf_single, dim=1)
-        #print("gauss", gauss_log_pdf.shape)
-        return gauss_log_pdf
-
-    def num_params(self):
-        sum = self.node_parameterization.param_provider.num_params_from_leaf_index(self.means_idx)
-        if self.sigma_params_idx is not None:
-            sum += self.node_parameterization.param_provider.num_params_from_leaf_index(self.sigma_params_idx)
-        return sum
-
-
-    def reconstruct(self, node_num, case_num, recons):
-        my_sample = self.means[case_num, ...] #means.shape = [1000, 1, 4]
-        my_sample = my_sample[:, node_num]
-        #full_sample = torch.zeros((self.node_parameterization.num_total_variables,), device=my_sample.device)
-        #full_sample[self.region] = my_sample
-        #return full_sample
-
-        # we add our value since, there might be already another value (= doing 'inplace summation' instead of doing
-        # it explicitly in the product node)
-        recons[case_num, self.region] += my_sample
-
-
-class CiSPNECFLeafNode(CiSPNNode):
-    def __init__(self, region, node_parameterization: NodeParameterization):
-        super().__init__(region, is_leaf=True, childs=None)
-
-        self.node_parameterization = node_parameterization
-        self.process_config = node_parameterization.process_config
-        # self.num_gaussians = node_parameterization.num_gauss
-
-        # self.gauss_min_var = node_parameterization.gauss_min_var
-        # self.gauss_max_var = node_parameterization.gauss_max_var
-
-        # self.means_idx = self.node_parameterization.param_provider.generate_leaf_index(self.region, self.node_parameterization.num_gauss)
-        self.means_idx = self.node_parameterization.param_provider.generate_leaf_index(self.region, 1)
-
-        # if self.gauss_min_var < self.gauss_max_var:
-        #     self.sigma_params_idx = self.node_parameterization.param_provider.generate_leaf_index(self.region, self.node_parameterization.num_gauss)
-        # else:
-        #     self.sigma_params_idx = None
-
-        # parameters are set during forward pass
-        # self.dist = torch.distributions.Normal(0.0, 1.0)
-
-        # self.num_outputs = node_parameterization.num_gauss
-        self.num_outputs = 1
-
-    def forward(self, x):
-        # don't need params for ECF
-        # self.means = self.node_parameterization.param_provider.access_leaf_parameters(self.means_idx)
-
-        # if self.gauss_min_var < self.gauss_max_var:
-        #     sigma_params = self.node_parameterization.param_provider.access_leaf_parameters(self.sigma_params_idx)
-        #     sigma = self.gauss_min_var + torch.sigmoid(sigma_params) * (self.gauss_max_var - self.gauss_min_var)
-        # else:
-        #     sigma = 1.0
-
-        # self.dist.loc = self.means
-        # self.dist.scale = torch.sqrt(sigma)
-
-        local_inputs = x[:, self.region]  # select scope from data
-        local_inputs = torch.unsqueeze(local_inputs, -1)
-        gauss_log_pdf_single = self.dist.log_prob(local_inputs)
+        if self.disttype == 'AlphaStable':
+            self.stable_weights = self.node_parameterization.param_provider.access_leaf_parameters(self.stable_weights_idx)
+            # shape is batch_size, num_dists, 4
+            self.dist = AlphaStable(self.stable_weights[:, :, 0], self.stable_weights[:, :, 1], self.stable_weights[:, :, 2], self.stable_weights[:, :, 3], self.node_parameterization.num_alpha)
+            local_inputs = x[:, self.region]
+            logcf = torch.log(self.dist._cf(local_inputs) + 1e-8)
+            # print(f'alpha stable log cf shape is {logcf.shape}')
+            return logcf
+    
+    def logpdf(self, x):
+        epsilon = 1e-5 # parameter for laplace smoothing
+        if self.disttype == 'Categorical':
+            # print(f'category weights shape is (8000,4,2)')
+            self.category_weights = self.node_parameterization.param_provider.access_leaf_parameters(self.category_weights_idx)
+            max_value, _ = torch.max(self.category_weights, dim=2, keepdim=True)
+            self.category_weights = self.category_weights - max_value
+            self.category_weights = torch.softmax(self.category_weights, dim = 2)
+            # 1. Laplace smoothing for categorical distribution
+            K = self.categories
+            self.category_weights = (self.category_weights + epsilon) / (1 + K * epsilon)
+            self.dist = Categorical(self.category_weights)
+            local_inputs = x[:, self.region].reshape(-1,1) # shape is (batch_size, 1)
+            # 2. Handle the case when test set contains discrete values 
+            # that are not in the support of thentraining set
+            if (self.dist.log_prob(local_inputs) == -torch.inf).any():
+                if torch.max(local_inputs) > K:
+                    # Concatenate the new categories to the support, prob 
+                    batch_size = self.category_weights.shape[0]
+                    num_cat = self.category_weights.shape[1]
+                    delta = torch.max(local_inputs) - K
+                    self.category_weights = torch.cat((self.category_weights, torch.zeros((batch_size, num_cat, delta))), dim = 2)
+                    self.category_weights = (self.category_weights + epsilon) / (1 + (K + delta) * epsilon)
+                    self.dist = Categorical(self.category_weights)
+            # print(f'category_weights is {self.category_weights}')
+            # print(f'local_inputs is {local_inputs}')
+            # exit(0);
+            _logpdf = self.dist.log_prob(local_inputs).reshape(-1, self.node_parameterization.num_cat)
+        
+        if self.disttype == 'AlphaStable':
+            self.stable_weights = self.node_parameterization.param_provider.access_leaf_parameters(self.stable_weights_idx)
+            self.dist = AlphaStable(self.stable_weights[:, :, 0], self.stable_weights[:, :, 1], self.stable_weights[:, :, 2], self.stable_weights[:, :, 3], self.node_parameterization.num_alpha)
+            local_inputs = x[:, self.region]
+            _logpdf = self.dist.log_prob(local_inputs)
 
         # marginalized[v] = 0 -> variable v weights are kept in the forward pass
         # marginalized[v] = 1 -> variable v weights are zeroed out in the forward pass
         if self.process_config.marginalized is not None:
+            # marginalised shape is (batch_size, num_y_variables)
             #marginalized = torch.clip(marginalized, 0.0, 1.0)
-            local_marginalized = torch.unsqueeze(self.process_config.marginalized[:, self.region], -1)
+            # local_marginalized = torch.unsqueeze(self.process_config.marginalized[:, self.region], -1)
+            local_marginalized = (self.process_config.marginalized[:, self.region])
 
             # setting a value zero in log space = multiplying by one = marginalizing it out
-            gauss_log_pdf_single = gauss_log_pdf_single * (1 - local_marginalized)
-
-        gauss_log_pdf = torch.sum(gauss_log_pdf_single, dim=1)
+            # print(f'prev logpdf is {_logpdf}')
+            _logpdf = _logpdf * (1 - local_marginalized)
+            # print(f'new logpdf is {_logpdf}')
         #print("gauss", gauss_log_pdf.shape)
-        return gauss_log_pdf
+        return _logpdf
 
     def num_params(self):
-        sum = self.node_parameterization.param_provider.num_params_from_leaf_index(self.means_idx)
-        if self.sigma_params_idx is not None:
-            sum += self.node_parameterization.param_provider.num_params_from_leaf_index(self.sigma_params_idx)
+        if self.disttype == 'Categorical':
+            sum = self.node_parameterization.param_provider.num_params_from_leaf_index(self.category_weights_idx)
+        elif self.disttype == 'AlphaStable':
+            sum = self.node_parameterization.param_provider.num_params_from_leaf_index(self.stable_weights_idx)
         return sum
 
 
@@ -530,7 +601,7 @@ class CiSPNProcessConfig:
 
 class CiSPN(torch.nn.Module):
 
-    def __init__(self, region_graph: RegionGraph, node_parameterization: NodeParameterization):
+    def __init__(self, region_graph: RegionGraph, node_parameterization: Parameterization, discrete_ids : dict[int, int]):
         super().__init__()
         assert len(region_graph.region) == node_parameterization.num_total_variables
 
@@ -540,7 +611,11 @@ class CiSPN(torch.nn.Module):
         self.node_parameterization.param_provider.reset()
         self.process_config = node_parameterization.process_config
 
+        self.discrete_ids = discrete_ids
+        print(f'discrete_ids is {discrete_ids}')
+        
         # construct root node, and attach child trees
+        print(f'in cispn, region_graph.region is {region_graph.region}')
         childs = []
         for child_region in region_graph.childs:
             childs.append(self._from_graph(child_region, node_parameterization))
@@ -552,18 +627,36 @@ class CiSPN(torch.nn.Module):
         def collect_leafs(node):
             if node.is_leaf:
                 self.leafs.append(node)
+        
+        def structure(node):
+            print(f'Node type is {type(node)}, with region {node.region}')
+            print(f'children are {[(type(x), x.region) for x in node.childs]}')
         self.root.traverse(collect_leafs)
-
-    def _from_graph(self, region_node, node_parameterization):
+        # self.root.traverse(structure)
+        
+        
+        
+    def _from_graph(self, region_node : RegionGraphNode, node_parameterization : Parameterization):
+        """Here I should look at data and change node types accordingly
+        If it's a discrete variable, I should use a categorical distribution
+        If it's continuous and fits a gaussian, I should use a gaussian distribution
+        Else, for other continuous variables, I should use an alpha-stable distribution
+        """
         region = region_node.region
         childs = []
 
         if region_node.is_leaf:
-            childs.append(CiSPNGaussNode(region, node_parameterization))
+            if region in self.discrete_ids.keys():
+                childs.append(CiSPNLeafNode(region, node_parameterization, 'Categorical', self.discrete_ids[region[0]]))
+            else:
+                childs.append(CiSPNLeafNode(region, node_parameterization, 'AlphaStable'))
         else:
             for child_region in region_node.childs:
                 if child_region.is_leaf:
-                    childs.append(CiSPNGaussNode(child_region.region, node_parameterization))
+                    if child_region.region[0] in self.discrete_ids.keys():
+                        childs.append(CiSPNLeafNode(child_region.region, node_parameterization, 'Categorical', self.discrete_ids[child_region.region[0]]))
+                    else:
+                        childs.append(CiSPNLeafNode(child_region.region, node_parameterization, 'AlphaStable'))
                 else:
                     childs.append(CiSPNSumNode(
                         child_region.region,
@@ -574,15 +667,40 @@ class CiSPN(torch.nn.Module):
         else:
             return CiSPNProductNode(region, childs, node_parameterization)
 
-    def forward(self, x, y, marginalized=None):
+    def CFD(self, x, sigma = 1, d = 4, n = 40):
+        """Characteristic Function Distance between the estimated CF from the model,
+        and the empirical CF from the data.
+        Args:
+            cc: CiSPN model
+            x: data of size (B, D) where B is batch size, D is dimensionality"""
+        
+        t = torch.randn(d, n).to(x.device)
+        cf_vec = torch.cat([torch.exp(self.root.cf(t[:, i].reshape(1, -1)*sigma)) for i in range(n)], dim = 1)
+        # print(f'cf_vec is {cf_vec.shape}') (8000, 40)
+        # print(f'ecf is {ECF(t, x).shape}') (1, 40)
+        # exit(0);
+        return torch.mean(torch.square(torch.abs(cf_vec - ECF(t, x, individual=False))))
+        
+    def logpdf(self, x, y, marginalized=None):
         # x = condition data, y = var data
         self.process_config.marginalized = marginalized
         self.node_parameterization.param_provider.set_nn(self.nn)
         self.node_parameterization.param_provider.estimate_parameters(x)
-        result = self.root.forward(y)
+        result = self.root.logpdf(y) # likelihood of this variable data (X, D1, D2, D3)
         self.node_parameterization.param_provider.set_nn(None)
         self.node_parameterization.param_provider.set_params(None, None)
         self.process_config.marginalized = None
+
+        # return log likelihood
+        # print(f'logpdf result is {result.shape}')
+        return result
+    
+    def forward(self, x, y):
+        self.node_parameterization.param_provider.set_nn(self.nn)
+        self.node_parameterization.param_provider.estimate_parameters(x)
+        result = self.CFD(y, d = y.shape[1]) # likelihood of this variable data (X, D1, D2, D3)
+        self.node_parameterization.param_provider.set_nn(None)
+        self.node_parameterization.param_provider.set_params(None, None)
 
         # return log likelihood
         return result
@@ -598,17 +716,21 @@ class CiSPN(torch.nn.Module):
         self.process_config.record_argmax = False
 
         batch_size = targets.shape[0]
-
+    
         #FIXME write directly into torch tensor? We know the size ...
         recons = torch.clone(targets) * (1 - marginalized)
-        #recons = [None]*batch_size
+        # recons = zeros_like(targets)
         for i in range(batch_size):
             #recons[i] = self.reconstruct(i, recons)
             self.reconstruct(i, recons)
+            exit(0);
         #recons = torch.stack(recons, dim=0)
         return recons
 
     def reconstruct(self, case_num, recons):
+        """case_num is the number of the sample in the batch
+        recons is the tensor of size (batch_size, num_variables) that contains the reconstructed values,
+        initialised to zero, and updated in this function"""
         return self.root.reconstruct(0, case_num, recons)
 
     def num_parameters(self):
@@ -623,6 +745,8 @@ class CiSPN(torch.nn.Module):
             "Product": 0,
             "Sum": 0,
             "Gaussian": 0,
+            "Categorical": 0,
+            "AlphaStable": 0,
         }
         def record_nodes(node):
             if isinstance(node, CiSPNProductNode):
@@ -631,6 +755,10 @@ class CiSPN(torch.nn.Module):
                 counts["Sum"] += 1
             elif isinstance(node, CiSPNGaussNode):
                 counts["Gaussian"] += 1
+            elif isinstance(node, CiSPNLeafNode) and node.disttype == 'Categorical':
+                counts["Categorical"] += 1
+            elif isinstance(node, CiSPNLeafNode) and node.disttype == 'AlphaStable':
+                counts["AlphaStable"] += 1
             else:
                 raise ValueError("Unknown node instance")
         self.root.traverse(record_nodes)

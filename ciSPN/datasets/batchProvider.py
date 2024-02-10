@@ -1,7 +1,7 @@
 
 class BatchProvider:
 
-    def __init__(self, dataset, batch_size, reduced_sample_count=None, provide_incomplete_batch=False):
+    def __init__(self, dataset, batch_size, rng, reduced_sample_count=None, provide_incomplete_batch=False):
         self._dataset = dataset
         #self._input_group = self.Y
         #self._condition_group = self.X
@@ -13,29 +13,38 @@ class BatchProvider:
         # whether or not to provide an possibly incomplete last batch
         self.provide_incomplete_batch = provide_incomplete_batch
 
-        self._i = 0
+        # self._i = 0
+        self.rng = rng
+        
+        self.num_batches = self._num_provided_samples // self._batch_size
+        self.order = self.rng.permutation(self.num_batches)
+        self.current_batch_number = 0
 
     def has_data(self):
         # check if we have a full batch left
         if self.provide_incomplete_batch:
             return self._i != self._num_provided_samples
         else:
-            return self._i + self._batch_size <= self._num_provided_samples
+            # return self._i + self._batch_size <= self._num_provided_samples
+            return self.current_batch_number < self.num_batches
 
     def get_next_batch(self):
         if not self.has_data():
             # could not access a full batch
             raise RuntimeError("data provider run out of data")
 
-        if self.provide_incomplete_batch:
-            upper_idx = min(self._i + self._batch_size, self._num_provided_samples)
-        else:
-            upper_idx = self._i + self._batch_size
+        # if self.provide_incomplete_batch:
+        #     upper_idx = min(self._i + self._batch_size, self._num_provided_samples)
+        # else:
+        #     upper_idx = self._i + self._batch_size
+            
+        batch_starting = self._batch_size*self.order[self.current_batch_number]
+        condition_batch = self._dataset.X[batch_starting:batch_starting + self._batch_size]
+        target_batch = self._dataset.Y[batch_starting:batch_starting + self._batch_size]
+        
+        self.current_batch_number += 1
 
-        condition_batch = self._dataset.X[self._i:upper_idx]
-        target_batch = self._dataset.Y[self._i:upper_idx]
-
-        self._i = upper_idx
+        # self._i = upper_idx
 
         return condition_batch, target_batch
 
@@ -43,8 +52,10 @@ class BatchProvider:
         return self._dataset.Y[:self._num_provided_samples], self._dataset.X[:self._num_provided_samples]
 
     def reset(self):
-        self._dataset.shuffle_data()
-        self._i = 0
+        # self._dataset.shuffle_data()
+        # self._i = 0
+        self.order = self.rng.permutation(self.num_batches)
+        self.current_batch_number = 0
 
     def get_sample_batch(self):
         # outputs the first batch

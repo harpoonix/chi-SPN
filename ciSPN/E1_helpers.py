@@ -3,7 +3,10 @@ from models.spn_create import load_spn
 
 
 def get_experiment_name(dataset, model_name, seed, loss_name=None, loss2_name=None, loss2_factor_str=None,
-                        loss_params=None, E=1, provide_interventions=True, specific=None):
+                        loss_params=None, E=1, provide_interventions=True, specific=None, name = None):
+    if name == None or name == "None":
+        name = input("Name of experiment? ")
+    return name
     exp_name = f"E{E}_{dataset}_{model_name}"
     if loss_name is not None:
         exp_name += f"_{loss_name}"
@@ -25,8 +28,8 @@ def get_E1_experiment_name(dataset, model_name, seed, loss_name=None, loss2_name
                                loss2_name=loss2_name, loss2_factor_str=loss2_factor_str, loss_params=loss_params, E=1, provide_interventions=provide_interventions)
 
 
-def get_loss_path(dataset_name, loss_load_seed, E=1, provide_interventions=True):
-    loss_folder = get_experiment_name(dataset_name, "ciSPN", loss_load_seed, "NLLLoss", None, None, E=E, provide_interventions=provide_interventions)
+def get_loss_path(dataset_name, loss_load_seed, name, E=1, provide_interventions=True):
+    loss_folder = get_experiment_name(dataset_name, "ciSPN", loss_load_seed, "NLLLoss", None, None, E=E, provide_interventions=provide_interventions, name=name)
     return loss_folder
 
 

@@ -9,6 +9,11 @@ import pickle
 """
 Structural Causal Model
 
+    Age = Continuous, Uniformly distributed, A in [0, 100]
+    Food Habit = Continuous, Gaussian Noise
+    Health = Continuous, Gaussian Noise
+    Mobility = Continuous, Gaussian Noise
+    
     A = N_A, N_A is Uniform distributed, A in N
     F = 1_X(A) OR N_F, N_F is Bernoulli distributed, F in {0,1}
     H = alpha * F + beta * A + gamma * N_H, N_H is Bernoulli distributed and alpha + beta + gamma = 1, H in (0, 1]
@@ -26,6 +31,13 @@ Structural Causal Model
     
     Age, Food Habit, Health, Mobility -> Diagnose
     
+"""
+
+"""
+changes
+1) make Age categorical
+2) could try making diagnose variables more categorical, or more continuous
+for now diagnose is argmax
 """
 
 class SCM_HealthClassification():

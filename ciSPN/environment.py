@@ -4,7 +4,7 @@ from pathlib import Path
 
 environment = {
     "runtime": {
-        "initials": "MW",
+        "initials": "HP",
         "machines": {
             "server": {
                 "username": "ml-mwillig"
@@ -16,6 +16,56 @@ environment = {
     },
     "datasets": {
         "base": Path("../datasets/"),
+        "JOB_train": {
+            "base": Path("JOB/JobClassification/"),
+            "files": [
+                "JobClassification_do(B)=U(B)_N96000_train.pkl",
+                "JobClassification_do(E)=U(E)_N96000_train.pkl",
+                "JobClassification_do(I)=U(I)_N96000_train.pkl",
+                "JobClassification_do(Sk)=U(Sk)_N96000_train.pkl",
+                "JobClassification_None_N96000_train.pkl"
+            ]
+        },
+        "JOB_test": {
+            "base": Path("JOB/JobClassification/"),
+            "files": [
+                # "JobClassification_do(B)=U(B)_N24000_test.pkl",
+                # "JobClassification_do(E)=U(E)_N24000_test.pkl",
+                # "JobClassification_do(I)=U(I)_N24000_test.pkl",
+                # "JobClassification_do(Sk)=U(Sk)_N24000_test.pkl",
+                # "JobClassification_None_N24000_test.pkl"
+                'DoubleIntervention_do(B)=U(B)_do(E)=U(E)_N24000_test.pkl',
+                'DoubleIntervention_do(E)=U(E)_do(I)=U(I)_N24000_test.pkl',  
+                'DoubleIntervention_do(Sk)=U(Sk)_do(B)=U(B)_N24000_test.pkl',  
+                'DoubleIntervention_do(Sk)=U(Sk)_do(I)=U(I)_N24000_test.pkl',  
+            ]
+        },
+        "STUDENT_train" : {
+            "base": Path("Student/StudentData/"),
+            "files" : [
+                "Student_do(C)=U(C)_N96000_train.pkl",
+                "Student_do(M)=U(M)_N96000_train.pkl",
+                "Student_do(Q)=U(Q)_N96000_train.pkl",
+                "Student_do(T)=U(T)_N96000_train.pkl",
+                "Student_None_N96000_train.pkl"
+            ]
+        },
+        "STUDENT_test" : {
+            "base": Path("Student/StudentData/"),
+            "files" : [
+                # "Student_do(C)=U(C)_N24000_test.pkl",
+                # "Student_do(M)=U(M)_N24000_test.pkl",
+                # "Student_do(Q)=U(Q)_N24000_test.pkl",
+                # "Student_do(T)=U(T)_N24000_test.pkl",
+                # "Student_None_N24000_test.pkl"
+                'DoubleIntervention_do(C)=U(C)_do(M)=U(M)_N24000_test.pkl',
+                'DoubleIntervention_do(C)=U(C)_do(Q)=U(Q)_N24000_test.pkl',
+                'DoubleIntervention_do(C)=U(C)_do(T)=U(T)_N24000_test.pkl',
+                'DoubleIntervention_do(T)=U(T)_do(M)=U(M)_N24000_test.pkl',
+                'DoubleIntervention_do(T)=U(T)_do(Q)=U(Q)_N24000_test.pkl',
+                'DoubleIntervention_do(M)=U(M)_do(Q)=U(Q)_N24000_test.pkl'
+            ]
+        },
         "CHC_train": {
             "base": Path("causalHealthClassification/"),
             "files": [
