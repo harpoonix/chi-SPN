@@ -1,0 +1,48 @@
+Logging to ../experiments/E1_2/eval_logs/400batches_individual_accuracy.txt
+Arguments: Namespace(seeds='606', model='ciSPN', loss='NLLLoss', loss2=None, loss2_factor='1.0', dataset='CHC', known_intervention=False, samples=1, skip_samples=0, save=True, name='400batches_individual_accuracy')
+known intervention is False
+known intervention is False
+known intervention is False
+known intervention is False
+known intervention is False
+discrete_ids is [4, 5, 6]
+discrete_ids is {4: 2, 5: 2, 6: 2}
+example of X data is [1 0 0 0]
+example of Y data is [ 0.34405354  0.00604507 -0.40719949 -0.29070723  0.          1.
+  0.        ]
+x shape is (100000, 4)
+y shape is (100000, 7)
+Loading ciSPN
+discrete_ids is {4: 2, 5: 2, 6: 2}
+in cispn, region_graph.region is [0, 1, 2, 3, 4, 5, 6]
+num_inputs: 4
+== SPN Statistics ==
+Splits: 2
+Nodes: {'Product': 12, 'Sum': 11, 'Gaussian': 0, 'Categorical': 6, 'AlphaStable': 8}
+112 leaf parameters. 448 sum parameters.
+== Statistics End ==
+
+================Intervention None================
+{'D1': {'correct': 11367, 'total': 14800}, 'D2': {'correct': 10267, 'total': 14800}, 'D3': {'correct': 7966, 'total': 14800}}
+Percentage Accuracy
+{'D1': 76.8, 'D2': 69.4, 'D3': 53.8}
+
+================Intervention A================
+{'D1': {'correct': 12406, 'total': 16200}, 'D2': {'correct': 11273, 'total': 16200}, 'D3': {'correct': 8721, 'total': 16200}}
+Percentage Accuracy
+{'D1': 76.6, 'D2': 69.6, 'D3': 53.8}
+
+================Intervention F================
+{'D1': {'correct': 12999, 'total': 15600}, 'D2': {'correct': 9830, 'total': 15600}, 'D3': {'correct': 8371, 'total': 15600}}
+Percentage Accuracy
+{'D1': 83.3, 'D2': 63.0, 'D3': 53.7}
+
+================Intervention H================
+{'D1': {'correct': 13097, 'total': 16600}, 'D2': {'correct': 10621, 'total': 16600}, 'D3': {'correct': 9482, 'total': 16600}}
+Percentage Accuracy
+{'D1': 78.9, 'D2': 64.0, 'D3': 57.1}
+
+================Intervention M================
+{'D1': {'correct': 14235, 'total': 16800}, 'D2': {'correct': 7720, 'total': 16800}, 'D3': {'correct': 11645, 'total': 16800}}
+Percentage Accuracy
+{'D1': 84.7, 'D2': 46.0, 'D3': 69.3}

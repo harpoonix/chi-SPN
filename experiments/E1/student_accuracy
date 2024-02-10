@@ -1,0 +1,46 @@
+Arguments: Namespace(seeds='606', model='ciSPN', loss='NLLLoss', loss2=None, loss2_factor='1.0', dataset='STUDENT', known_intervention=False, samples=1, skip_samples=0, save=True, name='student_accuracy')
+known intervention is False
+known intervention is False
+known intervention is False
+known intervention is False
+known intervention is False
+discrete_ids is [0, 5]
+discrete_ids is {0: 5, 5: 3}
+example of X data is [0 0 1 0]
+example of Y data is [ 2.         -0.08915186 -0.00303915  0.72682059  0.01511394  1.        ]
+x shape is (120000, 4)
+y shape is (120000, 6)
+Loading ciSPN
+discrete_ids is {0: 5, 5: 3}
+in cispn, region_graph.region is [0, 1, 2, 3, 4, 5]
+num_inputs: 4
+== SPN Statistics ==
+Splits: 2
+Nodes: {'Product': 10, 'Sum': 9, 'Gaussian': 0, 'Categorical': 4, 'AlphaStable': 8}
+128 leaf parameters. 304 sum parameters.
+== Statistics End ==
+
+================Intervention None================
+{'S': {'correct': 8667, 'total': 14800}}
+Percentage Accuracy
+{'S': 58.6}
+
+================Intervention Q================
+{'S': {'correct': 10061, 'total': 17800}}
+Percentage Accuracy
+{'S': 56.5}
+
+================Intervention M================
+{'S': {'correct': 8736, 'total': 16000}}
+Percentage Accuracy
+{'S': 54.6}
+
+================Intervention C================
+{'S': {'correct': 9521, 'total': 16000}}
+Percentage Accuracy
+{'S': 59.5}
+
+================Intervention T================
+{'S': {'correct': 8687, 'total': 15400}}
+Percentage Accuracy
+{'S': 56.4}

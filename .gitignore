@@ -3,7 +3,7 @@ __pycache__
 .ipynb_checkpoints
 __MACOSX
 
-experiments
+
 datasets/**/*.png
 datasets/**/*.jpg
 datasets/**/*.svg

@@ -1,0 +1,48 @@
+Logging to ../experiments/E1_2/eval_logs/job_accuracy_400_top3.txt
+Arguments: Namespace(seeds='606', model='ciSPN', loss='NLLLoss', loss2=None, loss2_factor='1.0', dataset='JOB', known_intervention=False, samples=1, skip_samples=0, save=True, name='job_accuracy_400_top3')
+known intervention is False
+known intervention is False
+known intervention is False
+known intervention is False
+known intervention is False
+discrete_ids is [4, 5, 6]
+discrete_ids is {4: 7, 5: 10, 6: 2}
+example of X data is [0 0 0 1]
+example of Y data is [-0.78532791 -0.49970262 -0.09786039 -0.0267363   3.          6.
+  0.        ]
+x shape is (120000, 4)
+y shape is (120000, 7)
+Loading ciSPN
+discrete_ids is {4: 7, 5: 10, 6: 2}
+in cispn, region_graph.region is [0, 1, 2, 3, 4, 5, 6]
+num_inputs: 4
+== SPN Statistics ==
+Splits: 2
+Nodes: {'Product': 12, 'Sum': 11, 'Gaussian': 0, 'Categorical': 6, 'AlphaStable': 8}
+216 leaf parameters. 448 sum parameters.
+== Statistics End ==
+
+================Intervention None================
+{'E': {'correct': 9501, 'total': 14800}, 'D': {'correct': 12718, 'total': 14800}}
+Percentage Accuracy
+{'E': 64.2, 'D': 85.9}
+
+================Intervention I================
+{'E': {'correct': 11409, 'total': 17800}, 'D': {'correct': 11612, 'total': 17800}}
+Percentage Accuracy
+{'E': 64.1, 'D': 65.2}
+
+================Intervention E================
+{'E': {'correct': 7891, 'total': 16000}, 'D': {'correct': 13444, 'total': 16000}}
+Percentage Accuracy
+{'E': 49.3, 'D': 84.0}
+
+================Intervention Sk================
+{'E': {'correct': 9935, 'total': 15400}, 'D': {'correct': 9417, 'total': 15400}}
+Percentage Accuracy
+{'E': 64.5, 'D': 61.1}
+
+================Intervention B================
+{'E': {'correct': 10330, 'total': 16000}, 'D': {'correct': 13875, 'total': 16000}}
+Percentage Accuracy
+{'E': 64.6, 'D': 86.7}
