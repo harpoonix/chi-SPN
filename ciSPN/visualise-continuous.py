@@ -157,7 +157,7 @@ for seed in all_seeds:
     num_condition_vars = dataset.X.shape[1]
     num_target_vars = dataset.Y.shape[1]
 
-    latest_model_dict = {"CHC" : "lr_schedule", "JOB" : "job", "STUDENT" : "student"}
+    latest_model_dict = {"CHC" : "chc", "JOB" : "job", "STUDENT" : "student"}
     
     print(f"Loading {conf.explicit_load_part}")
     if conf.explicit_load_part == "ciSPN":
